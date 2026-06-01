@@ -1,11 +1,10 @@
-# DEC-Project-2
-
 A Data Engineering Bootcamp project on datacenters and electricity metrics. You can follow step by step below!
 
-![data-architecture.png](pics/architecture.png)
+# Batch Data
 
+![batch-data-architecture.png](pics/architecture.png)
 
-![dataflow.png](pics/database_organization.png)
+![batch-dataflow.png](pics/database_organization.png)
 
 
 ### Data Center Atlas (simulated as live data within a database)
@@ -241,8 +240,8 @@ U.S. Energy Information Administration:
 
 ![dbt_lineage.png](pics/dbt_lineage.png)
 
-
 ![fact-dim-model.png](pics/fact-dim-model.png)
+
 
 ### Dagster
 
@@ -253,18 +252,143 @@ U.S. Energy Information Administration:
 2. Navigate to the dagster folder and run `dagster dev`
     - click on the link that pops up for local host
 
+
 ### Preset
 
 1. If you want to create your own dashboard, you can create a new account with a free trial
 2. Log in then go to Settings > Database Creation > +Database > Snowflake 
-    -- Fill in remaining info, and get to work~
+    - Fill in remaining info, and get to work~
 
-![Preset.png](pics/preset_dashboard.png)
+![batch-Preset.png](pics/preset_dashboard.png)
+
 
 ### LLM AI
 1. With Snowflake Cloud you can create a Semantic View with Cortex Analyst, but if you try to deploy an agent you will hit a paywall.
 
 
+# Streaming Data
+
+![stream-data-architecture.png](pics/stream-architecture.png)
+
+![stream-dataflow.png](pics/stream-dataflow.png)
 
 
+### Realistic Fleet Telemetry Data
 
+TDengine Free Public MQTT Data Feed:
+- [Data source documentation](https://tdengine.com/free-public-mqtt-data-feed-real-time-solar-fleet-simulation-now-available/?utm_source=chatgpt.com)
+
+
+### Confluent
+
+1. Sign up for a Confluent Cloud account
+2. Navigate to Environments > Default > Clusters > Add new cluster
+    - Name: "cluster_solar"
+    - Cluster type: Basic
+    - Provider: aws
+3. Under our cluster Overview, grab the <bootstrap_server> url
+4. In the cluster, go to Topics > Create Topic
+    - Topic Name: "solar"
+    - Partitions: 1 (can scale up)
+    - Advanced Settings > Retention Time: 1 Day
+    - after creating topic, skip data contract
+5. Go to Connectors > Add Connector > MQTT Source
+    - Choose the newly created topic ("solar")
+    - Generate and download the <connector_api_key> and <connector_api_secret>
+    - Authentication
+        - List of Server URIs: "tcp://mqtt.tdengine.com:1883"
+        - MQTT Topics: "sites, grid" <!-- sites,inverters,strings,weather,grid -->
+    - Continue through the settings until the connector is launched
+    - Under our "solar" topic, we should now be able to see data coming through under Messages
+
+
+### Flink
+
+1. Sign up for an Apache Flink account
+2. In Confluent, go to SQL Workspaces > Create New Workspace
+3. Refer to the repo file `integrate\source\tdengine_flink.sql`
+    - Put the following SQL statements into their own code chunks within Flink, and run in order; the `INSERT` and `CREATE TABLE AS` statements will continue to run, whereas the `CREATE TABLE` statements will simply run and end
+    - Note: we can see the status of our Flink statements under Environments > default > Flink
+4. Head back to Environments > default > Schema Registry > Overview
+    - Retrieve the <public_endpoint>
+5. Go to API Keys > Add an API Key
+    - Select Account: My account
+    - Select Key Scope: Schema Registry
+    - Environment: default
+    - Create and download the <schema_registry_api_key> and <schema_registry_api_secret>
+
+
+### ClickHouse
+
+1. Sign up for a ClickHouse account
+2. Configure a cloud service
+    Database: ClickHouse
+    - Service Name:
+    - Cloud provider: AWS
+3. To ingest data from the Kafka topic on Confluent Cloud, go to Data Sources > Add Data Source > Create ClickPipe
+    - Source: Confluent Cloud
+    - ClickPipe Name: "sites_clickpipe"
+    - Broker: <bootstrap_server> from Confluent cluster
+    - API Key: <connector_api_key>
+    - API Secret: <connector_api_secret> 
+    - Schema Registry: enable
+        - Schema URL: <schema_registry_public_endpoint>
+        - API Key: <schema_registry_api_key>
+        - API Secret: <schema_registry_api_secret>
+    - Topic: sites_parsed
+    - Offset Selection: From Timestamp or From Latest
+    - Schema Format: AvroConfluent
+    - With the schema parsed we will want to upload data to new table:
+        - Disable the Nullable trigger for the Source Fields "ts" and "site_id"
+        - Sorting Key: "ts"
+        - Partition By: "site_id"
+    - Permissions: Full Access
+4. Follow step 3 again, with the following changes
+    - ClickPipe Name: "grid_clickpipe"
+    - Topic: grid_parsed
+    - Partition By: "meter_id"
+5. Follow step 3 again, with the following changes
+    - ClickPipe Name: "sites_1min_agg_clickpipe"
+    - Offset Selection: From Timestamp or From Latest
+    - Topic: sites_1min_agg
+    - Sorting Key: "window_start"
+5. We can create materialized views by running code in the SQL Console, e.g.
+    ```sql
+    CREATE MATERIALIZED VIEW site_power_leaders_1min
+    ENGINE = MergeTree
+    ORDER BY window_start
+    AS
+    SELECT
+        window_start,
+        window_end,
+        argMax(site_id, avg_ac_power_mw) AS max_actual_site_id, -- site with highest actual production
+        argMax(site_id, avg_expected_power_mw) AS max_expected_site_id, -- site with highest expected production
+        max(avg_ac_power_mw) AS max_avg_ac_power_mw, -- highest actual power during the minute
+        max(avg_expected_power_mw) AS max_avg_expected_power_mw, -- highest expected power during the minute
+        max(avg_expected_power_mw) - max(avg_ac_power_mw) AS power_gap_mw, -- difference between expected and actual top power
+        if( 
+            argMax(site_id, avg_ac_power_mw)
+            != argMax(site_id, avg_expected_power_mw),
+            1, -- expected top producer differs from actual top producer
+            0
+        ) AS mismatch_flag
+    FROM sites_1min_agg
+    GROUP BY
+        window_start,
+        window_end;
+    ```
+
+
+### Preset
+
+1. If you want to create your own dashboard, you can create a new account with a free trial
+2. Log in then go to Settings > Database Creation > +Database > Clickhouse, where we need to configure the following SQL Alchemy URI: clickhousedb://<username>:<password>@<hostname>:<port>/<database>
+    - In ClickHouse homepage choose Connect, which will display:
+        - the <username> (e.g. "default")
+        - the <hostname>:<port> (i.e. the https string, stripped of "https://")
+        - the database user <password>, via the option to reset password
+    - Go to the SQL Console and look at the database selector at the top to get the <database>
+3. Now under Datasetes > +Datasets, we can select our ClickHouse data
+    - Fill in remaining info, and get to work~
+    
+![stream-Preset.png](pics/preset_dashboard.png)
