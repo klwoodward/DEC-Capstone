@@ -390,5 +390,5 @@ TDengine Free Public MQTT Data Feed:
     - Go to the SQL Console and look at the database selector at the top to get the <database>
 3. Now under Datasetes > +Datasets, we can select our ClickHouse data
     - Fill in remaining info, and get to work~
-    
-![stream-Preset.png](pics/preset_dashboard.png)
+
+![stream-Preset.png](pics/stream-preset-dashboard.png)
