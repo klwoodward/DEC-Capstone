@@ -144,7 +144,3 @@ GROUP BY
     window_end,
     site_id,
     fleet;
-
----------------------------------
--- statement 6 (create materialized view for preset)
----------------------------------
