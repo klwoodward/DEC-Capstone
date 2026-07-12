@@ -276,7 +276,7 @@ U.S. Energy Information Administration:
 ### Realistic Fleet Telemetry Data
 
 TDengine Free Public MQTT Data Feed:
-- [Data source documentation](https://tdengine.com/free-public-mqtt-data-feed-real-time-solar-fleet-simulation-now-available/?utm_source=chatgpt.com)
+- [Data source documentation](https://tdengine.com/free-public-mqtt-data-feed-real-time-solar-fleet-simulation-now-available)
 
 
 ### Confluent
